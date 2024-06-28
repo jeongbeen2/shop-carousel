@@ -1,20 +1,9 @@
-// src/InfiniteCarousel.jsx
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import styled from '@emotion/styled';
-import { keyframes } from '@emotion/react';
 import ProductCard from './ProductCard';
 
 const MOBILE_BREAKPOINT = 768;
 const AUTO_SCROLL_INTERVAL = 3000; // 3초
-
-const scroll = keyframes`
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(calc(-100% / 2));
-  }
-`;
 
 const CarouselContainer = styled.div`
   width: 100%;
@@ -28,9 +17,7 @@ const CarouselContainer = styled.div`
 
 const CarouselTrack = styled.div`
   display: flex;
-  width: 200%; // Double the width to allow for seamless looping
-  animation: ${scroll} 60s linear infinite;
-  animation-play-state: ${props => props.isPaused ? 'paused' : 'running'};
+  transition: transform 0.3s ease;
   cursor: grab;
 
   &:active {
@@ -38,29 +25,27 @@ const CarouselTrack = styled.div`
   }
 
   @media (max-width: ${MOBILE_BREAKPOINT}px) {
-    width: 100%;
-    animation: none;
     flex-wrap: wrap;
     justify-content: center;
   }
 `;
 
 const CarouselItem = styled.div`
-  flex: 0 0 calc(100% / 12); // Show 6 items on largest screen
+  flex: 0 0 calc(100% / 6); // Show 6 items on largest screen
   max-width: 300px;
   padding: 10px;
   box-sizing: border-box;
 
   @media (max-width: 1600px) {
-    flex: 0 0 calc(100% / 10); // Show 5 items
+    flex: 0 0 calc(100% / 5); // Show 5 items
   }
 
   @media (max-width: 1280px) {
-    flex: 0 0 calc(100% / 8); // Show 4 items
+    flex: 0 0 calc(100% / 4); // Show 4 items
   }
 
   @media (max-width: 1024px) {
-    flex: 0 0 calc(100% / 6); // Show 3 items
+    flex: 0 0 calc(100% / 3); // Show 3 items
   }
 
   @media (max-width: ${MOBILE_BREAKPOINT}px) {
@@ -95,20 +80,22 @@ const ScrollButton = styled.button`
 
 const InfiniteCarousel = ({ items }) => {
   const trackRef = useRef(null);
-  const [isPaused, setIsPaused] = useState(false);
+  const [position, setPosition] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
-  const [scrollLeft, setScrollLeft] = useState(0);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+
+  const itemWidth = trackRef.current ? trackRef.current.children[0].offsetWidth : 0;
+  const totalWidth = items.length * itemWidth;
 
   const resetAutoScroll = useCallback(() => {
-    setIsPaused(true);
-    setTimeout(() => setIsPaused(false), AUTO_SCROLL_INTERVAL);
+    setAutoScrollEnabled(false);
+    setTimeout(() => setAutoScrollEnabled(true), AUTO_SCROLL_INTERVAL);
   }, []);
 
   const handleMouseDown = (e) => {
     setIsDragging(true);
-    setStartX(e.pageX - trackRef.current.offsetLeft);
-    setScrollLeft(trackRef.current.scrollLeft);
+    setStartX(e.pageX - position);
     resetAutoScroll();
   };
 
@@ -119,54 +106,65 @@ const InfiniteCarousel = ({ items }) => {
   const handleMouseMove = (e) => {
     if (!isDragging) return;
     e.preventDefault();
-    const x = e.pageX - trackRef.current.offsetLeft;
-    const walk = (x - startX) * 2;
-    trackRef.current.scrollLeft = scrollLeft - walk;
+    const x = e.pageX - startX;
+    setPosition(x);
   };
 
   const handleScroll = (direction) => {
-    const scrollAmount = trackRef.current.offsetWidth / 2;
-    trackRef.current.scrollBy({
-      left: direction === 'left' ? -scrollAmount : scrollAmount,
-      behavior: 'smooth',
-    });
+    const newPosition = position + (direction === 'left' ? itemWidth : -itemWidth);
+    setPosition(newPosition);
     resetAutoScroll();
   };
 
   useEffect(() => {
     const track = trackRef.current;
     if (track) {
-      const resetAnimationOnIteration = () => {
-        track.style.animation = 'none';
-        track.offsetHeight; // Trigger reflow
-        track.style.animation = null;
-      };
-
       track.addEventListener('mousedown', handleMouseDown);
-      track.addEventListener('mouseup', handleMouseUp);
-      track.addEventListener('mousemove', handleMouseMove);
-      track.addEventListener('mouseleave', handleMouseUp);
-      track.addEventListener('animationiteration', resetAnimationOnIteration);
+      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('mousemove', handleMouseMove);
 
       return () => {
         track.removeEventListener('mousedown', handleMouseDown);
-        track.removeEventListener('mouseup', handleMouseUp);
-        track.removeEventListener('mousemove', handleMouseMove);
-        track.removeEventListener('mouseleave', handleMouseUp);
-        track.removeEventListener('animationiteration', resetAnimationOnIteration);
+        window.removeEventListener('mouseup', handleMouseUp);
+        window.removeEventListener('mousemove', handleMouseMove);
       };
     }
-  }, [isDragging, startX, scrollLeft, handleMouseDown, handleMouseUp, handleMouseMove]);
+  }, [isDragging, position, startX, handleMouseDown, handleMouseUp, handleMouseMove]);
+
+  useEffect(() => {
+    let animationFrame;
+    const autoScroll = () => {
+      if (autoScrollEnabled) {
+        setPosition((prevPosition) => {
+          const newPosition = prevPosition - 1;
+          return newPosition <= -totalWidth ? 0 : newPosition;
+        });
+      }
+      animationFrame = requestAnimationFrame(autoScroll);
+    };
+
+    animationFrame = requestAnimationFrame(autoScroll);
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, [autoScrollEnabled, totalWidth]);
+
+  const renderItems = () => {
+    const repeatedItems = [...items, ...items, ...items]; // 아이템을 3번 반복
+    return repeatedItems.map((item, index) => (
+      <CarouselItem key={index}>
+        <ProductCard product={item} />
+      </CarouselItem>
+    ));
+  };
 
   return (
     <CarouselContainer>
       <ScrollButton onClick={() => handleScroll('left')}>←</ScrollButton>
-      <CarouselTrack ref={trackRef} isPaused={isPaused}>
-        {items.concat(items).map((item, index) => (
-          <CarouselItem key={index}>
-            <ProductCard product={item} />
-          </CarouselItem>
-        ))}
+      <CarouselTrack
+        ref={trackRef}
+        style={{ transform: `translateX(${position}px)` }}
+      >
+        {renderItems()}
       </CarouselTrack>
       <ScrollButton onClick={() => handleScroll('right')}>→</ScrollButton>
     </CarouselContainer>
